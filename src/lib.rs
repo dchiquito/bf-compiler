@@ -1,75 +1,40 @@
 #[derive(Debug, Eq, PartialEq)]
-pub enum Operation {
-    Add(u8),
-    Shift(usize),
-    LoopStart(usize),
-    LoopEnd(usize),
+pub enum Symbol {
+    Increment,
+    Decrement,
+    MoveLeft,
+    MoveRight,
+    LoopStart,
+    LoopEnd,
     Read,
     Write,
 }
 
-type Program = Vec<Operation>;
+impl TryInto<Symbol> for &char {
+    type Error = ();
+
+    fn try_into(self) -> Result<Symbol, Self::Error> {
+        match self {
+            '+' => Ok(Symbol::Increment),
+            '-' => Ok(Symbol::Decrement),
+            '<' => Ok(Symbol::MoveLeft),
+            '>' => Ok(Symbol::MoveRight),
+            '[' => Ok(Symbol::LoopStart),
+            ']' => Ok(Symbol::LoopEnd),
+            ',' => Ok(Symbol::Read),
+            '.' => Ok(Symbol::Write),
+            _ => Err(()),
+        }
+    }
+}
+
+type Program = Vec<Symbol>;
 
 pub fn parse(source: &str) -> Program {
-    let mut program = vec![];
-    let mut add = 0;
-    let mut shift = 0;
-    for symbol in source.chars() {
-        match symbol {
-            // Anything but + and -
-            '<' | '>' | '[' | ']' | ',' | '.' => {
-                if add != 0 {
-                    program.push(Operation::Add(add));
-                    add = 0;
-                }
-            }
-            _ => (),
-        }
-        match symbol {
-            // Anything but < and >
-            '+' | '-' | '[' | ']' | ',' | '.' => {
-                if shift != 0 {
-                    program.push(Operation::Shift(shift));
-                    shift = 0;
-                }
-            }
-            _ => (),
-        }
-        match symbol {
-            '+' => add = add.wrapping_add(1),
-            '-' => add = add.wrapping_add(u8::MAX),
-            '<' => shift = shift.wrapping_add(usize::MAX),
-            '>' => shift = shift.wrapping_add(1),
-            '[' => program.push(Operation::LoopStart(0)),
-            ']' => program.push(Operation::LoopEnd(0)),
-            ',' => program.push(Operation::Read),
-            '.' => program.push(Operation::Write),
-            _ => (),
-        }
-    }
-    if add != 0 {
-        program.push(Operation::Add(add))
-    }
-    if shift != 0 {
-        program.push(Operation::Shift(shift))
-    }
-    // Fill out the loop pointers, now that everything is parsed out and grouped
-    let mut stack = vec![];
-    for i in 0..program.len() {
-        if let Operation::LoopStart(_) = program[i] {
-            stack.push(i);
-        }
-        if let Operation::LoopEnd(_) = program[i] {
-            let start = stack.pop().expect("Unmatched ]");
-            let end = i;
-            program[start] = Operation::LoopStart(end);
-            program[end] = Operation::LoopEnd(start);
-        }
-    }
-    if !stack.is_empty() {
-        panic!("Unmatch [");
-    }
-    program
+    source
+        .chars()
+        .filter_map(|c| TryInto::<Symbol>::try_into(&c).ok())
+        .collect()
 }
 
 const TAPE_SIZE: usize = 100_000;
@@ -91,20 +56,56 @@ impl Execution {
     }
     pub fn step(&mut self) {
         match self.program[self.pc] {
-            Operation::Add(a) => self.tape[self.pointer] = self.tape[self.pointer].wrapping_add(a),
-            Operation::Shift(s) => self.pointer = self.pointer.wrapping_add(s) % TAPE_SIZE,
-            Operation::LoopStart(end) => {
+            Symbol::Increment => self.tape[self.pointer] = self.tape[self.pointer].wrapping_add(1),
+            Symbol::Decrement => {
+                self.tape[self.pointer] = self.tape[self.pointer].wrapping_add(u8::MAX)
+            }
+            Symbol::MoveLeft => self.pointer = (self.pointer + TAPE_SIZE - 1) % TAPE_SIZE,
+            Symbol::MoveRight => self.pointer = (self.pointer + 1) % TAPE_SIZE,
+            Symbol::LoopStart => {
                 if self.tape[self.pointer] == 0 {
-                    self.pc = end;
+                    let mut nesting = 0;
+                    for i in self.pc..self.program.len() {
+                        match self.program[i] {
+                            Symbol::LoopStart => nesting += 1,
+                            Symbol::LoopEnd => {
+                                nesting -= 1;
+                                if nesting == 0 {
+                                    self.pc = i;
+                                    break;
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                    if nesting != 0 {
+                        panic!("Unmatched [")
+                    }
                 }
             }
-            Operation::LoopEnd(start) => {
+            Symbol::LoopEnd => {
                 if self.tape[self.pointer] != 0 {
-                    self.pc = start;
+                    let mut nesting = 0;
+                    for i in (0..=self.pc).rev() {
+                        match self.program[i] {
+                            Symbol::LoopEnd => nesting += 1,
+                            Symbol::LoopStart => {
+                                nesting -= 1;
+                                if nesting == 0 {
+                                    self.pc = i;
+                                    break;
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                    if nesting != 0 {
+                        panic!("Unmatched ]")
+                    }
                 }
             }
-            Operation::Read => todo!("Implement reading"),
-            Operation::Write => print!("{}", self.tape[self.pointer] as char),
+            Symbol::Read => todo!("Implement reading"),
+            Symbol::Write => print!("{}", self.tape[self.pointer] as char),
         }
         self.pc += 1;
     }
@@ -114,4 +115,3 @@ impl Execution {
         }
     }
 }
-
