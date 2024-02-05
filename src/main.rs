@@ -1,3 +1,7 @@
+use bf_compiler::{parse, Execution};
+
 fn main() {
-    println!("Hello, world!");
+    let mut exec = Execution::new(parse("++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++."));
+    // let mut exec = Execution::new(parse("[]"));
+    exec.run()
 }
