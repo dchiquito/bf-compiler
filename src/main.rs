@@ -1,4 +1,4 @@
-use bf_compiler::impl1::{parse, Execution};
+use bf_compiler::{parse, Execution};
 
 fn main() {
     let mut exec = Execution::new(parse("++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++."));
