@@ -6,6 +6,7 @@ pub enum Operation {
     Shift(usize),
     Loop(Program),
     PureLoop(PureLoop),
+    Zero,
     Read,
     Write,
 }
@@ -106,6 +107,7 @@ pub fn pure_loop_effects(program: &Program) -> Option<PureLoop> {
             // unknowable (for now)
             Operation::PureLoop(pl) => return None,
             // These all have side affects, making the loop impure
+            Operation::Zero => return None,
             Operation::Loop(_) => return None,
             Operation::Read => return None,
             Operation::Write => return None,
@@ -125,7 +127,13 @@ pub fn optimize(program: &mut Program) {
     (0..program.len()).for_each(|i| {
         if let Operation::Loop(l) = &mut program[i] {
             if let Some(pl) = pure_loop_effects(l) {
-                program[i] = Operation::PureLoop(pl);
+                if pl.shift == 0
+                    && (pl.adds == HashMap::from([(0, 1)]) || pl.adds == HashMap::from([(0, 255)]))
+                {
+                    program[i] = Operation::Zero;
+                } else {
+                    program[i] = Operation::PureLoop(pl);
+                }
             } else {
                 optimize(l);
             }
@@ -170,6 +178,7 @@ pub fn run_loop(program: &Program, tape: &mut [u8], pointer: &mut usize, actuall
                         }
                     }
                 }
+                Operation::Zero => tape[*pointer] = 0,
                 Operation::Read => todo!("Implement reading"),
                 Operation::Write => print!("{}", tape[*pointer] as char),
             }
