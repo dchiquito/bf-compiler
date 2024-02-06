@@ -1,8 +1,11 @@
+use std::collections::HashMap;
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum Operation {
     Add(u8),
     Shift(usize),
     Loop(Program),
+    PureLoop(PureLoop),
     Read,
     Write,
 }
@@ -73,6 +76,63 @@ pub fn parse_loop(source: &[char], actual_loop: bool) -> (Program, usize) {
     (program, i)
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct PureLoop {
+    adds: HashMap<usize, u8>,
+    shift: usize,
+}
+
+pub fn pure_loop_effects(program: &Program) -> Option<PureLoop> {
+    println!("Loopin {:?}", program);
+    let mut pure_loop = PureLoop {
+        adds: HashMap::default(),
+        shift: 0,
+    };
+    let mut pointer: usize = 0;
+    for op in program.iter() {
+        match op {
+            Operation::Add(a) => {
+                if let Some(b) = pure_loop.adds.get(&pointer) {
+                    pure_loop.adds.insert(pointer, a.wrapping_add(*b));
+                } else {
+                    pure_loop.adds.insert(pointer, *a);
+                }
+            }
+            Operation::Shift(s) => {
+                pointer = pointer.wrapping_add(*s);
+                pure_loop.shift = pure_loop.shift.wrapping_add(*s);
+            }
+            // The internal loop might operate on some other index, so its effects on this loop are
+            // unknowable (for now)
+            Operation::PureLoop(pl) => return None,
+            // These all have side affects, making the loop impure
+            Operation::Loop(_) => return None,
+            Operation::Read => return None,
+            Operation::Write => return None,
+        }
+    }
+    println!("Loopd {:?}", pure_loop);
+    if pure_loop.shift == 0 {
+        let incr = pure_loop.adds.get(&0);
+        if incr.is_none() || incr == Some(&0) {
+            panic!("Detected an infinite loop")
+        }
+    }
+    Some(pure_loop)
+}
+
+pub fn optimize(program: &mut Program) {
+    (0..program.len()).for_each(|i| {
+        if let Operation::Loop(l) = &mut program[i] {
+            if let Some(pl) = pure_loop_effects(l) {
+                program[i] = Operation::PureLoop(pl);
+            } else {
+                optimize(l);
+            }
+        }
+    });
+}
+
 const TAPE_SIZE: usize = 100_000;
 
 pub fn run_program(program: &Program) {
@@ -87,6 +147,29 @@ pub fn run_loop(program: &Program, tape: &mut [u8], pointer: &mut usize, actuall
                 Operation::Add(a) => tape[*pointer] = tape[*pointer].wrapping_add(*a),
                 Operation::Shift(s) => *pointer = pointer.wrapping_add(*s) % TAPE_SIZE,
                 Operation::Loop(the_loop) => run_loop(the_loop, tape, pointer, true),
+                Operation::PureLoop(pl) => {
+                    if pl.shift == 0 {
+                        let incr = pl.adds.get(&0).expect("Loop must increment");
+                        let expected = 0_u8.wrapping_sub(tape[*pointer]);
+                        // TODO something better than this dumb ass O(n) algorithm
+                        let mut reps: u8 = 0;
+                        while reps.wrapping_mul(*incr) != expected {
+                            reps += 1;
+                        }
+                        for (offset, add) in pl.adds.iter() {
+                            let p = pointer.wrapping_add(*offset) % TAPE_SIZE;
+                            tape[p] = tape[p].wrapping_add(add.wrapping_mul(reps));
+                        }
+                    } else {
+                        while tape[*pointer] != 0 {
+                            for (offset, add) in pl.adds.iter() {
+                                let p = pointer.wrapping_add(*offset);
+                                tape[p] = tape[p].wrapping_add(*add);
+                            }
+                            *pointer = pointer.wrapping_add(pl.shift) % TAPE_SIZE;
+                        }
+                    }
+                }
                 Operation::Read => todo!("Implement reading"),
                 Operation::Write => print!("{}", tape[*pointer] as char),
             }
